@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd wiki/AI_skills.wiki && git status:*)",
+      "Bash(cd wiki/AI_skills.wiki && git diff:*)",
+      "Bash(cd wiki/AI_skills.wiki && git log:*)",
+      "Bash(cd wiki/AI_skills.wiki && git add:*)",
+      "Bash(cd wiki/AI_skills.wiki && git commit *)",
+      "Bash(git -C wiki/AI_skills.wiki status:*)",
+      "Bash(git -C wiki/AI_skills.wiki diff:*)",
+      "Bash(git -C wiki/AI_skills.wiki log:*)",
+      "Bash(git -C wiki/AI_skills.wiki add:*)",
+      "Bash(git -C wiki/AI_skills.wiki commit *)",
+      "Bash(./scripts/kg/build-graph.sh)",
+      "Bash(./wiki/init-wiki.sh)",
+      "Bash(./wiki/init-wiki.sh *)",
+      "Bash(./wiki/agents/claude-code/setup.sh)",
+      "Bash(./wiki/agents/claude-code/setup.sh *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(uv run python *)"
+    ]
+  }
+}
