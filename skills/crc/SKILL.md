@@ -29,9 +29,9 @@ You can either `export NETID=csweet1` and `export LAB=csweet1_lab` in your shell
 ## Mental model (read this first)
 
 - **CRC uses SGE/UGE (Sun/Univa Grid Engine), NOT SLURM.** The submission verb is `qsub`, monitor is `qstat`, cancel is `qdel`, queue topology is `qhost` / `qconf`. Anyone reaching for `sbatch` or `squeue` is in the wrong universe.
-- **The frontend is `crcfe01.crc.nd.edu` (Linux) or `crcfe02.crc.nd.edu` (Mac).** Per the docs, Macs are supposed to use crcfe02; in practice crcfe01 works fine from both. The cluster has a shared filesystem so either frontend sees the same `/users/$NETID/` home and the same queue state.
+- **Frontends round-robin: `crcfe01`, `crcfe02`, `crcfe03`** (all `.crc.nd.edu`). The official docs only list 01 (Linux) and 02 (Mac) but 03 exists too. They share the filesystem, so any frontend sees the same `/users/$NETID/` home and the same queue state. Pick `crcfe01` as the default; if it's slow or unreachable, fall through to 02 or 03.
 - **Home is `/users/$NETID/`, NOT `/home/$NETID/`.** Hardcoded `/home/` paths will fail silently with empty `ls`. When scping, always use `/users/$NETID/...`.
-- **Direct laptop → CRC is password+Duo every time.** SSH keys are not pre-installed on bastion or crcfe01 (verified empirically; the docs are silent on key pair setup). The only automation-friendly path is the ControlMaster persistent socket on area-52.
+- **Direct laptop → CRC is password+Duo every time, AND password auth is the load-bearing path even for advanced users.** This is not just a Duo problem. CRC home directories live on NetFile NFS (`superior-data.crc.nd.edu:/primary_users`), which requires a Kerberos ticket that is **only minted on password authentication**. With SSH key auth, login succeeds but the home directory comes up empty and unwritable — the AFS/NetFile mount can't acquire the ticket. So even if you could install a key on bastion or crcfe01, you'd land in a broken shell. **Password is the canonical path; ControlMaster persistent socket on area-52 is the only way to make it agent-friendly.**
 - **`area-52` is the jump host.** Per the `/area-52` skill, area-52 holds the ControlMaster socket for crcfe01. Once a human establishes that master interactively (`ssh crcfe01` from area-52 → password + Duo), every subsequent automated call hops through for 24 h. This skill assumes that master is alive.
 
 ## Authentication and access
@@ -59,6 +59,31 @@ For off-campus humans (not for this skill, but worth knowing):
 - VPN-then-direct is the canonical path (skip bastion).
 - `bastion.crc.nd.edu` is the fallback off-campus relay (password + Duo).
 - The `/area-52` ControlMaster route works from any network the laptop can reach area-52 from (Tailscale).
+
+**Never run `ssh-copy-id` against any CRC host, and never use `ssh -v` to debug auth attempts.** fail2ban is active on the frontends and bastion; ~3 failed/retried attempts lock out the source IP for 10 minutes. ssh-copy-id specifically triggers fail2ban almost immediately because it makes multiple connection attempts as part of its handshake. If you're locked out, wait 10 min — there's no expedited reset.
+
+## Filesystem layout
+
+CRC mounts several distinct filesystems. Use the right one for the right job:
+
+| Path | Backend | Purpose | Notes |
+|---|---|---|---|
+| `/users/$NETID/` | NetFile NFS (`superior-data.crc.nd.edu:/primary_users`) | Home — project files, scripts, weights | 100 GB quota. Persistent across job runs. Needs Kerberos ticket to mount, which is the reason password auth is required (see Authentication). |
+| `/scratch365/` | Panasas panfs | Fast read-only scratch | Useful for high-throughput temp output. Cleared on a 365-day rolling window. Being retired in June 2026; check `docs.crc.nd.edu` for the replacement. |
+| `/afs/crc.nd.edu/user/c/$NETID/` | AFS | Legacy home | Still mounted. Being officially retired May 2027. Mostly unused for new work. |
+| `/software/` | NFS read-only | Module installs | E.g., `/software/t/tensorflow/2.20/`. Don't write here. |
+
+For new project work, default to `/users/$NETID/`. The 100 GB quota is enough for HDF5 datasets and weight checkpoints; very large intermediate outputs that don't need to persist can go to `/scratch365/`.
+
+### Per-host setup, one-time
+
+First time on a CRC home, install pandas (the `tensorflow/2.20` module ships numpy and h5py but not pandas):
+
+```bash
+ssh area-52 'ssh crcfe01 "pip install --user pandas"'   # installs to ~/.local/lib/python3.12/site-packages/
+```
+
+The `--user` site-packages dir is on PYTHONPATH for the TF module, so batch jobs see it automatically. Do this once; do not run from inside a job script (race conditions if multiple jobs hit pip simultaneously).
 
 ## Modules system
 
@@ -162,6 +187,7 @@ Expected output: `Your job <NNNNNNN> ("<job_name>") has been submitted`. Capture
 
 - **`-pe smp N`** sets CPU slot count. Without `-pe` you get 1 slot (default). 4 is a reasonable default for a single-GPU TF job (data loading needs a few cores).
 - **`-l gpu_card=N`** is what actually allocates GPUs. Omit it and your job lands on a CPU node even if you set `-q gpu`. This is a common silent failure.
+- **SGE sets `CUDA_VISIBLE_DEVICES` dynamically** to the allocated GPU index after the shell environment is established; TensorFlow picks it up on import. **Do NOT call `os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")` in scripts that target the cluster** — that's an area-52 convention (see `/area-52` skill) and on CRC it overrides SGE's allocation and breaks GPU access. If porting an area-52 training script to CRC, strip or condition that line.
 - **`-q gpu@@$LAB` is the default.** Lab hostgroups give priority access and preempt non-lab jobs running on the same hardware — your job either starts immediately on an idle slot or knocks an interloper off. `-q gpu` is the general campus queue and is contended; only use it as a fallback when the lab queue is full and the wait exceeds your time budget.
 - **`-cwd` + `-o logs/path`** — `-cwd` makes the relative `-o` resolve correctly. Otherwise the log goes to `~/<jobname>.o<jobid>` which is annoying.
 - **`module load tensorflow/2.20`** is the canonical TF on CRC. The package is at `/software/t/tensorflow/2.20/`. There is no venv on CRC for ML work — use modules.
@@ -184,6 +210,16 @@ ssh area-52 'ssh crcfe01 "free_gpus.sh @<labname>"'
 ```
 
 Returns GPU slots available right now. Use this before submitting a sweep to estimate wave parallelism.
+
+For per-node breakdown (which nodes are full, which have free GPU cards), use `qstat -f` against the queue:
+
+```bash
+ssh area-52 'ssh crcfe01 "qstat -f -q gpu@@<labname>"'
+```
+
+Output lists each node with its `resv/used/tot.` slot counts. A node with 0 used is fully free. Note **slots ≠ GPUs**: an interactive `QLOGIN` takes 1 slot without a GPU, so a node can show `used=1` while all GPU cards are still available.
+
+**Parallel-jobs-per-node capacity.** Empirical: two SGE jobs each requesting `gpu_card=1` on the same A6000 node showed no PCIe contention — wall-clock indistinguishable from solo runs. Three parallel jobs per node should also be fine; four would saturate the PCIe bus.
 
 ## Parameter sweep pattern
 
@@ -288,7 +324,8 @@ Then locally plot a heatmap with matplotlib's `imshow` to visualize the grid.
 - **Shell quoting nesting is brutal.** When chaining `ssh area-52 'ssh crcfe01 "..."'`, escape carefully: `\$` for CRC-side eval, `\\\$` if there's a third level. Test with `echo` before running anything destructive.
 - **`qsub` reports the job ID to stdout; capture it.** Otherwise you have to scrape it back from `qstat -u` which is racy.
 - **The first 60-90 s of any job is TF init.** Don't panic if there's no epoch output for 2 min after the job enters `r` state.
-- **Mac users supposed to use crcfe02 per docs.** In practice crcfe01 works from Mac; ignore the official guidance unless you hit a problem.
+- **Mac users supposed to use crcfe02 per docs.** In practice crcfe01 works from Mac; ignore the official guidance unless you hit a problem. crcfe03 exists too as a third option (docs don't mention it).
+- **rsync source flattens single files to dest root.** `rsync foo.h5 host:dest/` puts the file at `dest/foo.h5` regardless of the file's original path — it doesn't preserve the source's directory structure. If you want `dest/chemo_data/foo.h5`, either rsync the parent directory and let `-a` recurse, or `mv` after transfer. Common silent data-organisation bug.
 
 ## Recovery
 

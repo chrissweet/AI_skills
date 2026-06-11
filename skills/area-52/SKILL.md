@@ -15,7 +15,7 @@ allowed-tools:
 
 # Skill: area-52 GPU Workstation Operator
 
-Drive the campus-hardwired Linux GPU workstation named `area-52`. The hostname resolves via Tailscale Magic DNS — **always use the short name, never the FQDN `area-52.campus.nd.edu`** (the FQDN forces a slow campus DNS path; Tailscale wants the short name).
+Drive the campus-hardwired Linux GPU workstation named `area-52`. The hostname resolves via Tailscale Magic DNS — **prefer the short name `area-52`** (the FQDN `area-52.campus.nd.edu` forces a slow campus DNS path; Tailscale wants the short form). Fall back to the FQDN only when DNS misbehaves (Tailscale occasionally fails to resolve the short form when the macOS DNS cache is stale; it typically resolves itself within a few minutes).
 
 ## User configuration
 
@@ -31,6 +31,10 @@ You can either `export NETID=csweet1` in your shell or substitute inline. The LL
 
 - **Persistent compute box.** Always-on, no scheduler, no billing, no queue. Direct ssh, run anything, leave tmux sessions overnight.
 - **2× NVIDIA RTX A6000 (48 GB each).** Index 0 and 1. Select with `CUDA_VISIBLE_DEVICES=0` or `=1` when launching, or `=0,1` for both. `nvidia-smi --query-gpu=index,name,memory.free,utilization.gpu --format=csv` shows which are free.
+- **Concurrent-session GPU convention.** csweet1 often runs two parallel Claude sessions on this host. **GPU 0 is the default for the current Claude session; GPU 1 is reserved for the other session.** If you need to use GPU 1, the user calls it out explicitly. Check before launching anything that takes more than a few minutes:
+  ```python
+  os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")  # override to "1" only when the user says so
+  ```
 - **The Starlink-laptop reminder.** If your laptop is on a satellite or otherwise bandwidth-limited connection (csweet1's laptop runs Starlink), and area-52 is hardwired to the campus backbone, **build any large derived dataset (HDF5, dumps, big rsync) ON area-52, not on the laptop.** The laptop's upload bandwidth is the bottleneck. If you find yourself about to scp 1 GB+ from laptop → area-52, stop and reconsider.
 - **ControlMaster to CRC lives here.** area-52 holds the SSH ControlMaster socket for `crcfe01.crc.nd.edu`. Once a human establishes that master interactively (password + Duo), every subsequent automated call to CRC hops through for 24 h. See the `/crc` skill — it depends on this host.
 
@@ -44,7 +48,14 @@ scp area-52:path/ local          # pull file
 rsync -avP local/ area-52:path/  # sync a tree
 ```
 
-If `ssh area-52` fails to resolve, run `tailscale status | grep area-52` from the laptop to confirm the Tailscale tunnel is up. The short name is the right form; do not switch to the FQDN.
+If `ssh area-52` fails to resolve, run `tailscale status | grep area-52` from the laptop to confirm the Tailscale tunnel is up. If the tunnel is up but the short name resolves slowly or intermittently, fall back to the FQDN (`area-52.campus.nd.edu`) — the Tailscale DNS occasionally drops the short form when the macOS DNS cache is stale.
+
+If ssh succeeds at the network layer but auth fails with `Permission denied (publickey)` after a recent Mac reboot, the macOS keychain has failed to unlock the stored SSH key passphrase. Fix:
+
+```bash
+ssh-add --apple-load-keychain    # re-prime the agent from the keychain
+ssh area-52 hostname             # verify
+```
 
 ## Project layout conventions
 
