@@ -1,6 +1,19 @@
 # AI_skills
 
-<one-sentence description, edit me>
+AI skills derived from my work that provide transferable capabilities — Claude Code skills (`skills/`) and their wiki documentation (`wiki/AI_skills.wiki/`) for compute infrastructure (CRC SGE cluster, area-52 workstation, Open WebUI LLM API, Google Colab CLI).
+
+## Installing the skills
+
+The `skills/<name>/SKILL.md` files are the canonical source. Claude Code loads user-global skills from `~/.claude/skills/<name>/SKILL.md`. Mirror the canonical source into the live location with:
+
+```bash
+bash scripts/install-skills.sh           # additive sync (safe; never removes)
+bash scripts/install-skills.sh --prune   # remove ~/.claude/skills/<name> entries no longer in repo
+```
+
+After installation, the skills are invocable from any project via `/area-52`, `/crc`, `/crc-llm`, `/colab`.
+
+When editing a skill, edit `skills/<name>/SKILL.md` (canonical), then re-run `install-skills.sh` to push the change into the live location. The repo is the source of truth; `~/.claude/skills/` is a generated mirror.
 
 <!--
   This README was generated from README.md.template by
