@@ -21,3 +21,4 @@ wiki/*.wiki/
 # Keep this in git if you want a permanent trail of template syncs;
 # uncomment the line below if you prefer it local-only.
 # .llm-wiki-template-log.md
+.DS_Store
