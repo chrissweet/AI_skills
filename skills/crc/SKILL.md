@@ -1,6 +1,6 @@
 ---
 name: crc
-description: Submit and monitor jobs on the Notre Dame CRC SGE/UGE cluster (`crcfe01.crc.nd.edu`). Use when running batch GPU jobs, lab-queue submissions to `gpu@@<labname>`, parameter sweeps with qsub loops, or aggregating SGE log output. Anchors on the ControlMaster-via-area-52 path because direct laptop→CRC ssh requires NetID password + Duo every time.
+description: Submit and monitor jobs on the Notre Dame CRC SGE/UGE cluster (`crcfe01.crc.nd.edu`). Use when running batch GPU jobs, lab-queue submissions to `gpu@@<labname>`, parameter sweeps with qsub loops, or aggregating SGE log output. Includes the one-time ControlMaster setup recipe (SSH config block, bootstrap, verification) and anchors every operation on the ControlMaster-via-jump-host path because direct laptop→CRC ssh requires NetID password + Duo every time.
 user-invocable: true
 allowed-tools:
   - Read
@@ -59,6 +59,59 @@ For off-campus humans (not for this skill, but worth knowing):
 - VPN-then-direct is the canonical path (skip bastion).
 - `bastion.crc.nd.edu` is the fallback off-campus relay (password + Duo).
 - The `/area-52` ControlMaster route works from any network the laptop can reach area-52 from (Tailscale).
+
+### One-time ControlMaster setup (on the jump host)
+
+The recovery section above assumes the ControlMaster is configured; if it isn't, here's the recipe. **Run this once on the jump host** (`area-52` for csweet1, or any long-lived campus-resident host you own). It's idempotent — re-running won't break anything.
+
+**1.** Append this managed block to `~/.ssh/config` on the jump host (replace `$NETID` with your NetID literally; SSH config doesn't expand env vars):
+
+```
+# >>> crcfe01 ControlMaster block (managed) >>>
+Host crcfe01 crcfe0?
+    HostName %h.crc.nd.edu
+    User $NETID
+    PreferredAuthentications password,keyboard-interactive
+    PubkeyAuthentication no
+    GSSAPIAuthentication no
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 24h
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+# <<< crcfe01 ControlMaster block (managed) <<<
+```
+
+Key choices in the block:
+
+- **`Host crcfe01 crcfe0?`** — matches `crcfe01`, `crcfe02`, `crcfe03`; one block covers all three frontends (they share filesystem + queue state).
+- **`PubkeyAuthentication no` and `GSSAPIAuthentication no`** — stops the client from offering keys or GSSAPI tickets that the server would reject. Without these, ssh tries each method, fails, and fail2ban counts the attempts.
+- **`PreferredAuthentications password,keyboard-interactive`** — explicitly goes straight to password; `keyboard-interactive` is the method Duo uses when it prompts.
+- **`ControlPath ~/.ssh/cm-%r@%h:%p`** — predictable socket name (`%r` = remote user, `%h` = host, `%p` = port) so `ssh -O check crcfe01` always finds it.
+- **`ControlPersist 24h`** — the master survives this long after the last interactive connection. CRC docs don't bless a specific value; 24 h is the conservative ceiling that works in practice.
+- **`ServerAliveInterval 60` + `ServerAliveCountMax 3`** — keepalives during long idle periods. Without these the socket can silently die before `ControlPersist` would otherwise expire.
+
+**2.** Establish the socket interactively:
+
+```bash
+ssh crcfe01     # from the jump host, in a regular terminal
+# enter NetID password
+# tap Duo "Approve" on phone if prompted
+exit            # the socket persists in the background
+```
+
+The first connection also mints the Kerberos ticket the NetFile mount needs, so `/users/$NETID/` becomes writable in this and subsequent automated sessions.
+
+**3.** Verify the socket is alive:
+
+```bash
+ssh -O check crcfe01           # expected: "Master running (pid=NNNNN)"
+ls ~/.ssh/cm-*                  # expected: cm-$NETID@crcfe01.crc.nd.edu:22
+```
+
+**4.** Re-mint cadence: re-run step 2 once every ~24 h, or whenever an automated `ssh crcfe01` command from this jump host returns `Permission denied` instead of working. The skill's recovery flow auto-detects expiry and instructs the user to re-establish.
+
+**Explicit teardown** (rarely needed): `ssh -O exit crcfe01` closes the master and removes the socket file.
 
 **Never run `ssh-copy-id` against any CRC host, and never use `ssh -v` to debug auth attempts.** fail2ban is active on the frontends and bastion; ~3 failed/retried attempts lock out the source IP for 10 minutes. ssh-copy-id specifically triggers fail2ban almost immediately because it makes multiple connection attempts as part of its handshake. If you're locked out, wait 10 min — there's no expedited reset.
 

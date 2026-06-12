@@ -13,6 +13,8 @@ bash scripts/install-skills.sh --prune   # remove ~/.claude/skills/<name> entrie
 
 After installation, the skills are invocable from any project via `/area-52`, `/crc`, `/crc-llm`, `/colab`.
 
+Each skill directory also has a `README.md` that gives a human-readable summary, quickstart prompts, and links to the wiki synthesis page. The corresponding `SKILL.md` is the LLM-facing source loaded by Claude Code. Browse on GitHub: [skills/area-52/](skills/area-52/), [skills/crc/](skills/crc/), [skills/crc-llm/](skills/crc-llm/), [skills/colab/](skills/colab/).
+
 When editing a skill, edit `skills/<name>/SKILL.md` (canonical), then re-run `install-skills.sh` to push the change into the live location. The repo is the source of truth; `~/.claude/skills/` is a generated mirror.
 
 <!--
