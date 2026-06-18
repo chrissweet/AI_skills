@@ -98,20 +98,39 @@ The `calibration.json` schema:
 {
   "image_size": {"width": W, "height": H},
   "plot_frame_box": {
-    "left": col_of_y_axis, "right": col_of_x_max,
-    "top": row_of_y_max,  "bottom": row_of_x_axis,
-    "width": ..., "height": ...,
-    "offset_from_image_origin": {"x": left, "y": top}
+    "offset": {"x": ..., "y": ...},     // top-left of plot in image coords
+    "size":   {"width": ..., "height": ...},
+    "left": ..., "top": ..., "right": ..., "bottom": ...,
+    "description": "..."
   },
-  "data_extent_box": { ... },   // tighter box, only the data tick range
+  "pixels_per_coordinate_unit": {
+    "x": ...,                            // |1 / m_x|, px per x-unit
+    "y": ...,                            // |1 / m_y|, px per y-unit
+    "x_unit_label": "...", "y_unit_label": "..."
+  },
+  "data_to_pixel_formula": {
+    "col": "col = (x_value - b_x) / m_x",
+    "row": "row = (y_value - b_y) / m_y"
+  },
   "data_range": {"x_min": ..., "x_max": ..., "y_min": ..., "y_max": ...},
   "axis_calibration": {
-    "x_axis": {"formula": "value = m*col + b", "m": ..., "b": ...,
-               "inverse": "col = (value - b) / m"},
-    "y_axis": { ... }
-  }
+    "x_axis": {"formula": "...", "m": ..., "b": ..., "inverse": "..."},
+    "y_axis": {...}
+  },
+  "worked_example": {                    // sanity-check the formula visually
+    "scenario": "...",
+    "input": {"x": ..., "y": ...},
+    "compute": ["col = ...", "row = ..."],
+    "result": {"col": ..., "row": ...},
+    "verification": "..."
+  },
+  "detection_internals": { ... }         // axis-line detections + the rule used
 }
 ```
+
+A colleague needs three things to find any point in pixel coords: the plot frame's `offset`, the `pixels_per_coordinate_unit` ratio, and the data range — all top-level fields. The full formula is also written out in `data_to_pixel_formula` so the conversion is two arithmetic lines, no calibration math required. The `worked_example` confirms the formula on one known point.
+
+For a corpus of charts, bundle the per-chart `calibration.json` files into one set-wide `set_calibration.json` with a `summary_table` (for quick scanning) and a `charts` dict keyed by chart-id. An example is at `docs/example_set_calibration.json`.
 
 ## Always state the caveats
 
