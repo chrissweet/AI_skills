@@ -88,8 +88,30 @@ This loop is iterative. Repeat Phase 3 fix → Phase 4 re-plot until the reconst
 ### Phase 5 — Deliver
 
 - Write the data to CSV in `/mnt/user-data/outputs/` (one column per axis/series; for resampled curves, a shared x column plus one column per series). If you discovered and repaired occlusions in Phase 4, make sure the delivered CSV reflects the corrected values, and say so — earlier intermediate CSVs are superseded.
+- **Write a `calibration.json` next to the CSV** capturing the plot geometry: image size, the rectangle enclosing the axes and plot (pixel bounding box), the data tick range and its corresponding pixel box, and the linear axis calibration. Downstream consumers often need the plot region in pixel coords to re-render or to align with other extractions. Use `scripts/write_calibration.py` (programmatic API or CLI) to produce this consistently — don't roll your own format.
 - Save the reconstruction as PNG (and PDF if the user might want vector) so the user can see the loop was closed.
 - Present files with `present_files`.
+
+The `calibration.json` schema:
+
+```json
+{
+  "image_size": {"width": W, "height": H},
+  "plot_frame_box": {
+    "left": col_of_y_axis, "right": col_of_x_max,
+    "top": row_of_y_max,  "bottom": row_of_x_axis,
+    "width": ..., "height": ...,
+    "offset_from_image_origin": {"x": left, "y": top}
+  },
+  "data_extent_box": { ... },   // tighter box, only the data tick range
+  "data_range": {"x_min": ..., "x_max": ..., "y_min": ..., "y_max": ...},
+  "axis_calibration": {
+    "x_axis": {"formula": "value = m*col + b", "m": ..., "b": ...,
+               "inverse": "col = (value - b) / m"},
+    "y_axis": { ... }
+  }
+}
+```
 
 ## Always state the caveats
 
@@ -109,4 +131,5 @@ Pixel-extracted data is an estimate, never the original dataset. Every delivery 
 - `scripts/calibrate.py` — detect plot frame and tick-label pixel centers from the command line.
 - `scripts/extract_markers.py` — erode-line-away + CC + centroid marker detection from the command line.
 - `scripts/subtract_curves.py` — per-column thin-run subtraction with paired-edge preservation (§3b).
+- `scripts/write_calibration.py` — emit `calibration.json` capturing the plot frame box, data extent box, and axis calibration. Use this in Phase 5 alongside `data.csv`.
 - `scripts/check_artifacts.py` — scan an extracted CSV for clamped runs, spikes, and monotonicity violations.
